@@ -1,0 +1,1154 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Билатеральная стимуляция</title>
+<style>
+  /* ---------- Палитра: тёмная, приглушённая, без резких контрастов ---------- */
+  :root {
+    --bg: #0b0c0f;
+    --panel: #14161b;
+    --line: #252930;
+    --text: #c8cbd2;
+    --muted: #7b808a;
+    --accent: #8fb3c9;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Во время сеанса курсор скрыт (кроме паузы) */
+  body.session:not(.paused) { cursor: none; }
+
+  canvas {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  /* ---------- Общие оверлеи с мягким появлением ---------- */
+  .layer {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    transition: opacity .8s ease, transform .8s ease;
+  }
+  .layer.hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(6px);
+  }
+
+  /* ---------- Панель настроек ---------- */
+  .card {
+    width: min(440px, 100%);
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 22px 22px 18px;
+  }
+  .card h1 {
+    margin: 0 0 4px;
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: .2px;
+  }
+  .card .lead {
+    margin: 0 0 18px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .field { margin-bottom: 16px; }
+  .field-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 13px;
+    margin-bottom: 7px;
+  }
+  .field-head span:last-child { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  input[type=number], select {
+    width: 100%;
+    background: #0f1115;
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font: inherit;
+    font-size: 14px;
+  }
+
+  /* Сегментированный выбор (направление) */
+  .seg { display: flex; gap: 6px; }
+  .seg button {
+    flex: 1;
+    background: #0f1115;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 0;
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+    transition: color .3s, border-color .3s;
+  }
+  .seg button.active { color: var(--text); border-color: var(--accent); }
+
+  /* Цветовые образцы */
+  .swatches { display: flex; gap: 10px; }
+  .swatch {
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    outline: 1px solid var(--line);
+    cursor: pointer;
+    padding: 0;
+    transition: border-color .3s;
+  }
+  .swatch.active { border-color: var(--bg); outline: 2px solid var(--accent); }
+
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .check input { accent-color: var(--accent); width: 16px; height: 16px; }
+
+  .actions { display: flex; gap: 10px; margin-top: 6px; }
+  button.primary, button.ghost {
+    font: inherit;
+    font-size: 14px;
+    border-radius: 10px;
+    padding: 11px 16px;
+    cursor: pointer;
+    transition: background .3s, color .3s;
+  }
+  button.primary {
+    flex: 1;
+    background: #2a3843;
+    color: #dfe8ee;
+    border: 1px solid #36505f;
+  }
+  button.primary:hover { background: #314451; }
+  button.ghost {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--line);
+  }
+  button.ghost:hover { color: var(--text); }
+
+  .keys {
+    margin: 14px 0 0;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+  kbd {
+    font-family: inherit;
+    font-size: 11px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0 5px;
+  }
+
+  /* ---------- Сообщение между подходами ---------- */
+  #message {
+    flex-direction: column;
+    text-align: center;
+    pointer-events: none;
+    transition: opacity 1.2s ease, transform 1.2s ease;
+  }
+  #count {
+    font-size: 44px;
+    font-weight: 300;
+    color: #8d929b;
+    font-variant-numeric: tabular-nums;
+    min-height: 54px;
+  }
+  #msgText {
+    margin-top: 10px;
+    font-size: 18px;
+    color: #9a9fa8;
+    max-width: 520px;
+    line-height: 1.5;
+  }
+  #msgSub {
+    margin-top: 14px;
+    font-size: 13px;
+    color: #5f646d;
+  }
+
+  /* ---------- Подготовка (пошаговые подсказки) ---------- */
+  .prep-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+  .dots { display: flex; gap: 6px; }
+  .dots i {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--line);
+    transition: background .4s;
+  }
+  .dots i.on { background: var(--accent); }
+  button.link {
+    background: none;
+    border: 0;
+    color: var(--muted);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    padding: 4px 0;
+  }
+  button.link:hover { color: var(--text); }
+  .card h2 {
+    margin: 0 0 12px;
+    font-size: 19px;
+    font-weight: 500;
+    color: #d3d6dc;
+  }
+  .prep-body { font-size: 14px; line-height: 1.6; color: #aeb2ba; min-height: 150px; }
+  .prep-body p { margin: 0 0 12px; }
+  .prep-body ul { margin: 0 0 12px; padding-left: 18px; }
+  .prep-body li { margin-bottom: 6px; }
+  .prep-body b { color: #d3d6dc; font-weight: 500; }
+  .prep-body textarea {
+    width: 100%;
+    min-height: 64px;
+    resize: vertical;
+    background: #0f1115;
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 9px 10px;
+    font: inherit;
+    font-size: 14px;
+    margin-bottom: 4px;
+  }
+  .prep-body .opt { font-size: 12px; color: #646973; margin-bottom: 12px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .chips button {
+    background: #0f1115;
+    color: #9ca1aa;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 5px 11px;
+    font: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+  .chips button:hover { color: var(--text); border-color: #3a414b; }
+  .note {
+    border-left: 2px solid #3a4a56;
+    padding: 8px 12px;
+    background: #111318;
+    border-radius: 0 8px 8px 0;
+    font-size: 13px;
+    color: #9ca1aa;
+    margin-top: 6px;
+  }
+  .sud-comment { font-size: 13px; color: #8d929b; min-height: 40px; margin-top: 8px; }
+
+  /* ---------- Экран завершения ---------- */
+  #done .card, #ground .card { text-align: center; }
+  #done h2, #ground h2 { font-size: 24px; font-weight: 400; color: #b9bdc5; }
+  #done .sub, #ground .sub { margin: 0 0 20px; color: var(--muted); font-size: 14px; line-height: 1.6; }
+  #done .rate { text-align: left; margin-bottom: 14px; }
+  #sudCompare { font-size: 13px; color: #8d929b; min-height: 20px; margin-top: 6px; }
+  #done .closing {
+    text-align: left;
+    font-size: 13px;
+    color: #8d929b;
+    line-height: 1.6;
+    margin: 0 0 20px;
+  }
+  #done .actions, #ground .actions { justify-content: center; }
+  #done button.primary, #ground button.primary { flex: 0 0 auto; padding: 11px 28px; }
+
+  /* ---------- Тихие подсказки внизу ---------- */
+  .hint {
+    position: fixed;
+    left: 0; right: 0;
+    bottom: 28px;
+    text-align: center;
+    font-size: 13px;
+    color: #6a6f78;
+    pointer-events: none;
+    transition: opacity .6s ease;
+    padding: 0 16px;
+  }
+  .hint.hidden { opacity: 0; }
+</style>
+</head>
+<body>
+
+<canvas id="stage"></canvas>
+
+<!-- Панель настроек -->
+<div id="panel" class="layer">
+  <div class="card">
+    <h1>Билатеральная стимуляция</h1>
+    <p class="lead">Следи за точкой глазами, не поворачивая голову.</p>
+
+    <div class="field">
+      <div class="field-head"><span>Скорость, проходов туда-обратно в сек.</span><span id="speedVal"></span></div>
+      <input id="speed" type="range" min="0.3" max="2" step="0.1">
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <div class="field-head"><span>Проходов в подходе</span></div>
+        <input id="passes" type="number" min="1" max="500" step="1">
+      </div>
+      <div class="field">
+        <div class="field-head"><span>Подходов</span></div>
+        <select id="sets"></select>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-head"><span>Пауза между подходами</span><span id="pauseVal"></span></div>
+      <input id="pauseSec" type="range" min="0" max="60" step="1">
+    </div>
+
+    <div class="field">
+      <div class="field-head"><span>Размер точки</span><span id="sizeVal"></span></div>
+      <input id="size" type="range" min="20" max="80" step="1">
+    </div>
+
+    <div class="field">
+      <div class="field-head"><span>Цвет точки</span></div>
+      <div class="swatches" id="swatches"></div>
+    </div>
+
+    <div class="field">
+      <div class="field-head"><span>Направление</span></div>
+      <div class="seg" id="direction">
+        <button data-dir="h" title="Горизонталь">↔</button>
+        <button data-dir="dr" title="Диагональ ↘">↘</button>
+        <button data-dir="dl" title="Диагональ ↙">↙</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-head">
+        <label class="check"><input id="sound" type="checkbox"> Звук (стерео)</label>
+        <span id="volumeVal"></span>
+      </div>
+      <input id="volume" type="range" min="0" max="100" step="1">
+    </div>
+
+    <div class="field">
+      <label class="check"><input id="autoNext" type="checkbox"> Следующий подход стартует сам</label>
+    </div>
+
+    <div class="field">
+      <label class="check"><input id="prep" type="checkbox"> Подсказки перед сеансом (о чём думать)</label>
+    </div>
+
+    <div class="actions">
+      <button id="startBtn" class="primary">Начать</button>
+      <button id="fsBtn" class="ghost" title="Полный экран (F)">⛶ Экран</button>
+    </div>
+
+    <p class="keys">
+      <kbd>Пробел</kbd> старт / пауза &nbsp;·&nbsp; <kbd>Esc</kbd> стоп<br>
+      <kbd>↑</kbd> <kbd>↓</kbd> скорость ±0.1 &nbsp;·&nbsp; <kbd>F</kbd> полный экран
+    </p>
+  </div>
+</div>
+
+<!-- Пауза между подходами -->
+<div id="message" class="layer hidden">
+  <div id="count"></div>
+  <div id="msgText">Сделай вдох. Заметь, что сейчас в теле</div>
+  <div id="msgSub"></div>
+</div>
+
+<!-- Подготовка: пошаговые подсказки, о чём думать -->
+<div id="prepLayer" class="layer hidden">
+  <div class="card">
+    <div class="prep-top">
+      <div class="dots" id="prepDots"></div>
+      <button id="prepSkip" class="link">Пропустить →</button>
+    </div>
+    <h2 id="prepTitle"></h2>
+    <div id="prepBody" class="prep-body"></div>
+    <div class="actions">
+      <button id="prepBack" class="ghost">Назад</button>
+      <button id="prepNext" class="primary">Дальше</button>
+    </div>
+  </div>
+</div>
+
+<!-- Конец сеанса -->
+<div id="done" class="layer hidden">
+  <div class="card">
+    <h2>Сеанс завершён</h2>
+    <p class="sub">Побудь немного в тишине, прежде чем вернуться к делам.</p>
+    <div class="rate">
+      <div class="field-head"><span>Вернись к исходной картинке. Насколько неприятно сейчас?</span><span id="sudAfterVal"></span></div>
+      <input id="sudAfter" type="range" min="0" max="10" step="1">
+      <div id="sudCompare"></div>
+    </div>
+    <p class="closing">Заверши спокойно: представь место, где тебе безопасно, или мысленно сложи всё, что осталось, в контейнер до следующего раза. Не дошёл до нуля — это нормально, переработка продолжается и после сеанса.</p>
+    <div class="actions">
+      <button id="againBtn" class="primary">Ещё раз</button>
+      <button id="settingsBtn" class="ghost">Настройки</button>
+    </div>
+  </div>
+</div>
+
+<!-- Остановка посреди сеанса: заземление -->
+<div id="ground" class="layer hidden">
+  <div class="card">
+    <h2>Остановились</h2>
+    <p class="sub">
+      Открой глаза пошире. Почувствуй стопы на полу и опору под собой.<br>
+      Назови про себя 5 вещей, которые видишь, 4 звука, 3 ощущения в теле.<br>
+      Ты здесь, сейчас. То, что вспоминалось, уже прошло.
+    </p>
+    <div class="actions">
+      <button id="groundBtn" class="primary">К настройкам</button>
+    </div>
+  </div>
+</div>
+
+<div id="pauseHint" class="hint hidden">Пауза · Пробел — продолжить · Esc — стоп</div>
+<div id="toast" class="hint hidden"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  /* =====================================================================
+     Константы и настройки
+     ===================================================================== */
+  const TAU = Math.PI * 2;
+  const STORAGE_KEY = 'bls-settings-v2';
+
+  const FADE_IN = 0.8;     // сек: появление точки в центре
+  const RAMP_IN = 1.2;     // сек: плавный разгон амплитуды от центра
+  const FADE_OUT = 1.0;    // сек: угасание точки после остановки
+  const TEXT_GAP = 1.2;    // сек: даём тексту паузы погаснуть перед новым подходом
+
+  const COLORS = [
+    { name: 'Белый',        value: '#e6e3dc' },
+    { name: 'Голубой',      value: '#9ec6e2' },
+    { name: 'Зелёный',      value: '#a6d2b2' },
+    { name: 'Тёплый жёлтый', value: '#efd79b' },
+  ];
+
+  const DEFAULTS = {
+    speed: 0.8,
+    passes: 24,
+    pauseSec: 15,
+    sets: '3',          // '1'..'20' или 'inf'
+    size: 40,
+    color: COLORS[0].value,
+    direction: 'h',     // 'h' | 'dr' (↘) | 'dl' (↙)
+    sound: false,
+    volume: 50,
+    autoNext: true,
+    prep: true,         // показывать пошаговые подсказки перед сеансом
+  };
+
+  // Загрузка из localStorage (в приватном режиме может бросить исключение)
+  const S = { ...DEFAULTS };
+  try {
+    let saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+    if (!saved) {
+      // Миграция с v1: переносим всё, кроме скорости (новое значение по умолчанию медленнее)
+      saved = JSON.parse(localStorage.getItem('bls-settings-v1') || '{}');
+      delete saved.speed;
+    }
+    for (const k of Object.keys(DEFAULTS)) if (k in saved) S[k] = saved[k];
+  } catch (_) { /* работаем на значениях по умолчанию */ }
+
+  function save() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(S)); } catch (_) {}
+  }
+
+  /* Заметки подготовки (картинка, мысли, оценки) — живут только в этом браузере */
+  const NOTES_KEY = 'bls-notes-v1';
+  const notes = { image: '', negative: '', positive: '', body: '', sudBefore: null, sudAfter: null, last: null };
+  try { Object.assign(notes, JSON.parse(localStorage.getItem(NOTES_KEY) || '{}')); } catch (_) {}
+  function saveNotes() {
+    try { localStorage.setItem(NOTES_KEY, JSON.stringify(notes)); } catch (_) {}
+  }
+
+  /* =====================================================================
+     Утилиты
+     ===================================================================== */
+  const $ = (id) => document.getElementById(id);
+  const clamp01 = (v) => Math.min(1, Math.max(0, v));
+  const ease = (t) => 0.5 - 0.5 * Math.cos(Math.PI * clamp01(t)); // easeInOutSine
+  const round1 = (v) => Math.round(v * 10) / 10;
+
+  /* =====================================================================
+     Холст: адаптация под размер окна и плотность пикселей
+     ===================================================================== */
+  const canvas = $('stage');
+  const ctx = canvas.getContext('2d');
+  let W = 0, H = 0;
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  /* Позиция точки по нормированной координате s ∈ [-1, 1].
+     Траектория пересчитывается каждый кадр, поэтому ресайз применяется сразу. */
+  function pointPos(s) {
+    const r = S.size / 2;
+    const hx = Math.max(0, W / 2 - (W * 0.05 + r)); // половина хода по X с отступом 5%
+    const hy = Math.max(0, H / 2 - (H * 0.05 + r)); // половина хода по Y
+    switch (S.direction) {
+      case 'dr': return [W / 2 + s * hx, H / 2 + s * hy]; // ↘ из левого верха в правый низ
+      case 'dl': return [W / 2 - s * hx, H / 2 + s * hy]; // ↙ из правого верха в левый низ
+      default:   return [W / 2 + s * hx, H / 2];
+    }
+  }
+  // Знак горизонтали для s>0 (нужен для стерео-панорамы)
+  const dirSignX = () => (S.direction === 'dl' ? -1 : 1);
+
+  /* =====================================================================
+     Звук: мягкий синусоидальный тон, панорамируется в сторону точки
+     ===================================================================== */
+  let actx = null;
+
+  function ensureAudio() {
+    // AudioContext создаётся только по жесту пользователя
+    if (!actx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      actx = new AC();
+    }
+    if (actx.state === 'suspended') actx.resume();
+  }
+
+  function tone(pan) {
+    if (!S.sound || S.volume <= 0) return;
+    ensureAudio();
+    if (!actx) return;
+
+    const t0 = actx.currentTime;
+    const peak = (S.volume / 100) * 0.25;
+
+    const osc = actx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = 392; // G4: тёплый, не резкий
+
+    // Мягкая огибающая: быстрая, но не щелчковая атака и плавное затухание
+    const gain = actx.createGain();
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(peak, t0 + 0.025);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.3);
+
+    osc.connect(gain);
+    if (actx.createStereoPanner) {
+      const panner = actx.createStereoPanner();
+      panner.pan.value = pan;
+      gain.connect(panner).connect(actx.destination);
+    } else {
+      gain.connect(actx.destination);
+    }
+    osc.start(t0);
+    osc.stop(t0 + 0.35);
+  }
+
+  /* =====================================================================
+     Состояние сеанса
+     Фазы: idle → fadeIn → moving → settling → fadeOut → rest → (waitKey) → gap → fadeIn …
+           … → done
+     ===================================================================== */
+  let phase = 'idle';
+  let t = 0;            // время внутри текущей фазы (сек, с учётом паузы)
+  let theta = 0;        // фаза синусоиды; 1 проход туда-обратно = 2π
+  let env = 0;          // огибающая амплитуды 0..1 (плавный старт/остановка)
+  let envStart = 0;     // огибающая на момент начала остановки
+  let settleDur = 0.5;  // длительность остановки (полпрохода)
+  let opacity = 0;      // прозрачность точки
+  let lastPeak = -1;    // номер последнего пройденного крайнего положения (для звука)
+  let setIndex = 0;     // сколько подходов завершено
+  let totalSets = 1;
+  let restLeft = 0;     // остаток паузы между подходами
+  let shownCount = -1;
+
+  let paused = false;
+  let timeScale = 1;    // плавно стремится к 0 на паузе, чтобы не было рывка
+
+  /* Продвижение синусоиды + звук в крайних точках */
+  function advance(dt) {
+    theta += TAU * S.speed * dt;
+    // Крайние точки при theta = π/2 + kπ; чётное k — сторона s=+1
+    const k = Math.floor((theta - Math.PI / 2) / Math.PI);
+    if (k > lastPeak) {
+      lastPeak = k;
+      if (env > 0.4) tone((k % 2 === 0 ? 1 : -1) * dirSignX());
+    }
+  }
+
+  function update(dt) {
+    switch (phase) {
+      case 'fadeIn':
+        t += dt;
+        opacity = ease(t / FADE_IN);
+        if (t >= FADE_IN) {
+          phase = 'moving'; t = 0; theta = 0; lastPeak = -1;
+        }
+        break;
+
+      case 'moving':
+        t += dt;
+        advance(dt);
+        env = ease(t / RAMP_IN);
+        if (theta >= S.passes * TAU) {
+          // Набрали нужное число проходов — плавно гасим амплитуду к центру
+          phase = 'settling'; t = 0;
+          envStart = env;
+          settleDur = 0.5 / S.speed;
+        }
+        break;
+
+      case 'settling':
+        t += dt;
+        advance(dt);
+        env = envStart * (1 - ease(t / settleDur));
+        if (t >= settleDur) { env = 0; phase = 'fadeOut'; t = 0; }
+        break;
+
+      case 'fadeOut':
+        t += dt;
+        opacity = 1 - ease(t / FADE_OUT);
+        if (t >= FADE_OUT) {
+          opacity = 0;
+          setIndex++;
+          if (setIndex >= totalSets) showDone();
+          else startRest();
+        }
+        break;
+
+      case 'rest':
+        restLeft -= dt;
+        renderCountdown();
+        if (restLeft <= 0) {
+          if (S.autoNext) { hideMessage(); phase = 'gap'; t = 0; }
+          else {
+            phase = 'waitKey';
+            $('count').textContent = '';
+            $('msgSub').textContent = 'Пробел — следующий подход';
+          }
+        }
+        break;
+
+      case 'gap':
+        t += dt;
+        if (t >= TEXT_GAP) beginSet();
+        break;
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    if (opacity <= 0.001) return;
+    const [x, y] = pointPos(env * Math.sin(theta));
+    const r = S.size / 2;
+    ctx.globalAlpha = opacity;
+    ctx.fillStyle = S.color;
+    ctx.shadowColor = S.color;
+    ctx.shadowBlur = r * 0.6; // лёгкое мягкое свечение
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, TAU);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+
+  /* Главный цикл: 60 fps через requestAnimationFrame */
+  let last = performance.now();
+  function frame(now) {
+    // Ограничиваем шаг, чтобы после сворачивания вкладки не было скачка
+    const raw = Math.min(0.05, (now - last) / 1000);
+    last = now;
+
+    const target = paused ? 0 : 1;
+    timeScale += (target - timeScale) * (1 - Math.exp(-raw / 0.12));
+    if (Math.abs(target - timeScale) < 0.002) timeScale = target;
+
+    update(raw * timeScale);
+    draw();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  /* =====================================================================
+     Управление сеансом
+     ===================================================================== */
+  // «Активный» сеанс — когда точка движется или идёт пауза между подходами
+  const isActive = () => !['idle', 'prep', 'done', 'ground'].includes(phase);
+
+  // Показать один экран-слой и скрыть остальные
+  function showLayer(id) {
+    for (const l of ['panel', 'prepLayer', 'done', 'ground']) {
+      $(l).classList.toggle('hidden', l !== id);
+    }
+  }
+
+  function requestStart() {
+    if (S.prep) openPrep(); else startSession();
+  }
+
+  function startSession() {
+    ensureAudio();
+    showLayer(null);
+    hideMessage();
+    document.body.classList.add('session');
+    setPaused(false);
+    timeScale = 1;
+    setIndex = 0;
+    totalSets = S.sets === 'inf' ? Infinity : Number(S.sets);
+    beginSet();
+  }
+
+  function beginSet() {
+    phase = 'fadeIn';
+    t = 0; theta = 0; env = 0; opacity = 0; lastPeak = -1;
+  }
+
+  function startRest() {
+    restLeft = Number(S.pauseSec);
+    shownCount = -1;
+    phase = 'rest';
+    // Каждый третий подход — сверка с исходной картинкой, остальные — просто «что сейчас?»
+    $('msgText').textContent = setIndex % 3 === 0
+      ? 'Вернись к исходной картинке. Сколько сейчас из 10?'
+      : 'Сделай вдох. Заметь, что сейчас в теле';
+    const of = totalSets === Infinity ? '' : ` из ${totalSets}`;
+    $('msgSub').textContent = `Подход ${setIndex}${of} · дальше — с того места, куда пришёл`;
+    renderCountdown();
+    $('message').classList.remove('hidden');
+  }
+
+  function renderCountdown() {
+    const n = Math.max(0, Math.ceil(restLeft));
+    if (n !== shownCount) {
+      shownCount = n;
+      $('count').textContent = n > 0 ? n : '';
+    }
+  }
+
+  function hideMessage() { $('message').classList.add('hidden'); }
+
+  function showDone() {
+    phase = 'done';
+    setPaused(false);
+    document.body.classList.remove('session');
+    // Стартовое значение ползунка — исходная оценка (её и сравниваем)
+    const start = notes.sudBefore ?? 5;
+    $('sudAfter').value = start;
+    notes.sudAfter = null;
+    renderSudAfter(false);
+    showLayer('done');
+  }
+
+  function renderSudAfter(touched) {
+    const v = Number($('sudAfter').value);
+    $('sudAfterVal').textContent = touched || notes.sudAfter !== null ? `${v} / 10` : '—';
+    const b = notes.sudBefore;
+    let txt = '';
+    if (b !== null && b !== undefined && notes.sudAfter !== null) {
+      if (v < b) txt = `Было ${b}, стало ${v}. Движение есть.`;
+      else if (v === b) txt = `Было ${b}, и сейчас ${v}. Так бывает — иногда сдвиг приходит позже, в течение дня.`;
+      else txt = `Было ${b}, стало ${v}. Значит, материал поднялся. Позаботься о себе, сегодня можно на этом остановиться.`;
+    } else if (b !== null && b !== undefined) {
+      txt = `В начале было ${b}.`;
+    }
+    $('sudCompare').textContent = txt;
+  }
+
+  // Esc: из активного сеанса — на экран заземления, из остальных — к настройкам
+  function stopSession() {
+    const wasActive = isActive();
+    phase = wasActive ? 'ground' : 'idle';
+    opacity = 0; env = 0;
+    setPaused(false);
+    hideMessage();
+    document.body.classList.remove('session');
+    showLayer(wasActive ? 'ground' : 'panel');
+    exitFullscreen();
+  }
+
+  function toPanel() {
+    phase = 'idle';
+    showLayer('panel');
+  }
+
+  /* =====================================================================
+     Подготовка: пошаговые подсказки, о чём думать
+     ===================================================================== */
+  const STEPS = [
+    {
+      title: 'Как это работает',
+      html: `
+        <p>Ты не проживаешь событие заново. <b>Одной ногой — в воспоминании, другой — здесь</b>, в комнате, и следишь за точкой.</p>
+        <p>Провалиться туда целиком не нужно: это только закрепит реакцию. Совсем не думать об этом — тоже не сработает.</p>
+        <p>Дальше 4 коротких шага, 2–3 минуты. Записывать необязательно — можно отвечать себе мысленно.</p>
+        <div id="lastResult"></div>`,
+      after() {
+        if (notes.last) {
+          $('lastResult').innerHTML = `<div class="note">В прошлый раз (${notes.last.date}): было ${notes.last.before ?? '—'}, стало ${notes.last.after ?? '—'}.</div>`;
+        }
+      },
+    },
+    {
+      title: 'Картинка',
+      html: `
+        <p>Выбери <b>один кадр</b> — самый тяжёлый момент того события. Не весь фильм, один стоп-кадр.</p>
+        <textarea data-note="image" placeholder="Например: ночь, сижу на кровати, сердце колотится, кажется, что сейчас случится что-то страшное"></textarea>
+        <div class="opt">Необязательно. Сохраняется только в этом браузере.</div>`,
+    },
+    {
+      title: 'Мысль о себе',
+      html: `
+        <p>Какую мысль <b>о себе</b> это воспоминание до сих пор будто подтверждает?</p>
+        <div class="chips" data-for="negative">
+          <button>Я теряю контроль</button><button>Со мной что-то не так</button>
+          <button>Я в опасности</button><button>Я не справлюсь</button><button>Я беспомощен</button>
+        </div>
+        <textarea data-note="negative" placeholder="Своими словами"></textarea>`,
+    },
+    {
+      title: 'Чего хочется вместо',
+      html: `
+        <p>Во что хотелось бы <b>верить</b>, вспоминая это?</p>
+        <div class="chips" data-for="positive">
+          <button>Это было, и это прошло</button><button>Я в безопасности</button>
+          <button>Тревога неприятна, но не опасна</button><button>Я справился</button><button>Я могу с этим быть</button>
+        </div>
+        <textarea data-note="positive" placeholder="Своими словами"></textarea>`,
+    },
+    {
+      title: 'Тело и оценка',
+      html: `
+        <p>Держи картинку и мысль о себе. <b>Где это откликается в теле</b> прямо сейчас?</p>
+        <textarea data-note="body" placeholder="Грудь, живот, горло, руки…" style="min-height:44px"></textarea>
+        <div class="field" style="margin-top:12px">
+          <div class="field-head"><span>Насколько неприятно сейчас, 0–10</span><span id="sudBeforeVal"></span></div>
+          <input id="sudBefore" type="range" min="0" max="10" step="1">
+          <div class="sud-comment" id="sudComment"></div>
+        </div>`,
+      after() {
+        const el = $('sudBefore');
+        el.value = notes.sudBefore ?? 5;
+        const render = () => {
+          const v = Number(el.value);
+          $('sudBeforeVal').textContent = `${v} / 10`;
+          $('sudComment').textContent =
+            v <= 3 ? 'Заряда немного. Можно взять момент поострее — или просто начать.' :
+            v <= 7 ? 'Хорошая зона для работы.' :
+            v === 8 ? 'Можно, но внимательно следи за собой между подходами.' :
+            'Слишком горячо для самостоятельной работы. Возьми момент полегче — не самый пик.';
+        };
+        el.addEventListener('input', () => { notes.sudBefore = Number(el.value); saveNotes(); render(); });
+        if (notes.sudBefore === null) { notes.sudBefore = 5; saveNotes(); }
+        render();
+      },
+    },
+    {
+      title: 'Во время подхода',
+      html: `
+        <ul>
+          <li>Вызови картинку, мысль и ощущение в теле — и <b>просто следи за точкой</b>.</li>
+          <li><b>Ничего не удерживай и никуда не направляй.</b> Картинка может уплыть, смениться, прийти пустота — так и надо. Смотри, как из окна поезда.</li>
+          <li>Между подходами — вдох и короткое «что сейчас?», без анализа.</li>
+          <li>Следующий подход — с того места, куда пришёл, а не насильно к первой картинке.</li>
+        </ul>
+        <div class="note"><b>Если накрывает</b> — Esc. Открой глаза, стопы на пол, назови 5 вещей, которые видишь. На сегодня хватит, и это нормально.</div>`,
+      next: 'Начать',
+    },
+  ];
+
+  let prepStep = 0;
+
+  function openPrep() {
+    phase = 'prep';
+    prepStep = 0;
+    renderPrep();
+    showLayer('prepLayer');
+  }
+
+  function renderPrep() {
+    const step = STEPS[prepStep];
+    $('prepTitle').textContent = step.title;
+    $('prepBody').innerHTML = step.html;
+    $('prepDots').innerHTML = STEPS.map((_, i) => `<i class="${i <= prepStep ? 'on' : ''}"></i>`).join('');
+    $('prepBack').style.visibility = prepStep === 0 ? 'hidden' : 'visible';
+    $('prepNext').textContent = step.next || 'Дальше';
+
+    // Текстовые поля ↔ заметки (значение ставим через .value — без вставки в HTML)
+    $('prepBody').querySelectorAll('textarea[data-note]').forEach((ta) => {
+      const key = ta.dataset.note;
+      ta.value = notes[key] || '';
+      ta.addEventListener('input', () => { notes[key] = ta.value; saveNotes(); });
+    });
+    // Подсказки-«чипы» подставляют текст в поле
+    $('prepBody').querySelectorAll('.chips').forEach((box) => {
+      const ta = $('prepBody').querySelector(`textarea[data-note="${box.dataset.for}"]`);
+      box.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+        ta.value = b.textContent;
+        notes[box.dataset.for] = ta.value;
+        saveNotes();
+      }));
+    });
+    step.after?.();
+  }
+
+  function prepNext() {
+    if (prepStep < STEPS.length - 1) { prepStep++; renderPrep(); }
+    else startSession();
+  }
+
+  function prepBack() {
+    if (prepStep > 0) { prepStep--; renderPrep(); }
+  }
+
+  // Запись итога сеанса для «В прошлый раз…»
+  function recordResult() {
+    if (notes.sudBefore === null && notes.sudAfter === null) return;
+    const d = new Date();
+    notes.last = {
+      date: d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }),
+      before: notes.sudBefore,
+      after: notes.sudAfter,
+    };
+    saveNotes();
+  }
+
+  function setPaused(v) {
+    paused = v;
+    document.body.classList.toggle('paused', v);
+    $('pauseHint').classList.toggle('hidden', !v);
+  }
+
+  function onSpace() {
+    if (phase === 'idle') requestStart();
+    else if (phase === 'done') again();
+    else if (phase === 'prep' || phase === 'ground') return;
+    else if (phase === 'waitKey') { hideMessage(); phase = 'gap'; t = 0; }
+    else setPaused(!paused);
+  }
+
+  /* Скорость на лету */
+  let toastTimer = 0;
+  function changeSpeed(delta) {
+    S.speed = Math.min(2, Math.max(0.3, round1(S.speed + delta)));
+    save();
+    syncUI();
+    if (phase !== 'idle') {
+      const toast = $('toast');
+      toast.textContent = `Скорость ${S.speed.toFixed(1)}`;
+      toast.classList.remove('hidden');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.add('hidden'), 1200);
+    }
+  }
+
+  /* =====================================================================
+     Полноэкранный режим
+     ===================================================================== */
+  const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement;
+  let fsByApp = false; // отличаем наш переключатель от выхода по Esc браузером
+
+  function toggleFullscreen() {
+    fsByApp = true;
+    setTimeout(() => { fsByApp = false; }, 1000);
+    const el = document.documentElement;
+    if (!fsElement()) {
+      (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el);
+    } else {
+      (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+    }
+  }
+
+  function exitFullscreen() {
+    if (!fsElement()) return;
+    fsByApp = true;
+    setTimeout(() => { fsByApp = false; }, 1000);
+    (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+  }
+
+  // В полноэкранном режиме браузер сам перехватывает Esc и не отдаёт keydown —
+  // поэтому выход из полного экрана «не нами» во время сеанса считаем стопом.
+  function onFsChange() {
+    if (!fsElement() && !fsByApp && isActive()) stopSession();
+  }
+  document.addEventListener('fullscreenchange', onFsChange);
+  document.addEventListener('webkitfullscreenchange', onFsChange);
+
+  /* =====================================================================
+     Клавиатура
+     ===================================================================== */
+  window.addEventListener('keydown', (e) => {
+    const tag = e.target.tagName;
+    const inField = tag === 'INPUT' || tag === 'SELECT';
+    const typing = tag === 'TEXTAREA' || (inField && e.target.type === 'number');
+
+    // Пока человек пишет в поле — горячие клавиши (кроме Esc) не перехватываем
+    if (typing && e.code !== 'Escape') return;
+
+    if (e.code === 'Space') {
+      // На экранах подготовки/заземления пробел работает как обычно (нажимает кнопку)
+      if (phase === 'prep' || phase === 'ground') return;
+      e.preventDefault();
+      if (document.activeElement) document.activeElement.blur();
+      onSpace();
+    } else if (e.code === 'Escape') {
+      if (isActive()) stopSession();
+      else if (phase !== 'idle') { if (phase === 'done') recordResult(); toPanel(); }
+      else exitFullscreen();
+    } else if (e.code === 'KeyF') {
+      e.preventDefault();
+      toggleFullscreen();
+    } else if (e.code === 'ArrowUp' || e.code === 'ArrowDown') {
+      if (inField && !isActive()) return; // не мешаем стрелкам внутри полей
+      e.preventDefault();
+      changeSpeed(e.code === 'ArrowUp' ? 0.1 : -0.1);
+    }
+  });
+
+  /* =====================================================================
+     Панель настроек: построение и привязка
+     ===================================================================== */
+  // Подходы: 1–20 и «бесконечно»
+  const setsSel = $('sets');
+  for (let i = 1; i <= 20; i++) setsSel.add(new Option(String(i), String(i)));
+  setsSel.add(new Option('∞ бесконечно', 'inf'));
+
+  // Цвета
+  const swatchBox = $('swatches');
+  for (const c of COLORS) {
+    const b = document.createElement('button');
+    b.className = 'swatch';
+    b.style.background = c.value;
+    b.title = c.name;
+    b.dataset.color = c.value;
+    b.addEventListener('click', () => { S.color = c.value; save(); syncUI(); });
+    swatchBox.appendChild(b);
+  }
+
+  // Направление
+  document.querySelectorAll('#direction button').forEach((b) => {
+    b.addEventListener('click', () => { S.direction = b.dataset.dir; save(); syncUI(); });
+  });
+
+  // Ползунки и поля
+  function bind(id, parse) {
+    const el = $(id);
+    const ev = el.type === 'checkbox' || el.tagName === 'SELECT' ? 'change' : 'input';
+    el.addEventListener(ev, () => {
+      S[id] = parse(el);
+      save();
+      syncUI(id);
+    });
+  }
+  bind('speed',    (el) => round1(parseFloat(el.value)));
+  bind('pauseSec', (el) => parseInt(el.value, 10));
+  bind('size',     (el) => parseInt(el.value, 10));
+  bind('volume',   (el) => parseInt(el.value, 10));
+  bind('sets',     (el) => el.value);
+  bind('sound',    (el) => el.checked);
+  bind('autoNext', (el) => el.checked);
+  bind('prep',     (el) => el.checked);
+  bind('passes',   (el) => {
+    const v = parseInt(el.value, 10);
+    return Number.isFinite(v) ? Math.min(500, Math.max(1, v)) : DEFAULTS.passes;
+  });
+  $('passes').addEventListener('blur', () => { $('passes').value = S.passes; });
+
+  // Включение звука — заодно разблокируем аудио по жесту
+  $('sound').addEventListener('change', () => { if (S.sound) ensureAudio(); });
+
+  /* Отражение S в элементах управления. skip — поле, которое сейчас редактируется */
+  function syncUI(skip) {
+    if (skip !== 'speed')  $('speed').value = S.speed;
+    if (skip !== 'passes') $('passes').value = S.passes;
+    $('pauseSec').value = S.pauseSec;
+    $('size').value = S.size;
+    $('volume').value = S.volume;
+    $('sets').value = String(S.sets);
+    $('sound').checked = !!S.sound;
+    $('autoNext').checked = !!S.autoNext;
+    $('prep').checked = !!S.prep;
+
+    $('speedVal').textContent = Number(S.speed).toFixed(1);
+    $('pauseVal').textContent = `${S.pauseSec} с`;
+    $('sizeVal').textContent = `${S.size} px`;
+    $('volumeVal').textContent = `${S.volume}%`;
+    $('volume').disabled = !S.sound;
+
+    swatchBox.querySelectorAll('.swatch').forEach((b) =>
+      b.classList.toggle('active', b.dataset.color === S.color));
+    document.querySelectorAll('#direction button').forEach((b) =>
+      b.classList.toggle('active', b.dataset.dir === S.direction));
+  }
+  syncUI();
+
+  /* Кнопки */
+  $('startBtn').addEventListener('click', requestStart);
+  $('fsBtn').addEventListener('click', toggleFullscreen);
+  $('againBtn').addEventListener('click', again);
+  $('settingsBtn').addEventListener('click', () => { recordResult(); toPanel(); });
+  $('groundBtn').addEventListener('click', toPanel);
+  $('prepNext').addEventListener('click', prepNext);
+  $('prepBack').addEventListener('click', prepBack);
+  $('prepSkip').addEventListener('click', startSession);
+  $('sudAfter').addEventListener('input', () => {
+    notes.sudAfter = Number($('sudAfter').value);
+    saveNotes();
+    renderSudAfter(true);
+  });
+
+  // «Ещё раз» — та же мишень, без повторной подготовки; новая точка отсчёта = итог этого сеанса
+  function again() {
+    recordResult();
+    if (notes.sudAfter !== null) { notes.sudBefore = notes.sudAfter; saveNotes(); }
+    startSession();
+  }
+})();
+</script>
+</body>
+</html>
